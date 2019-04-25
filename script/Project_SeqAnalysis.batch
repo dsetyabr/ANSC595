@@ -1,0 +1,135 @@
+##ANSC595 project
+##fastq.info for creating fasta
+set.dir(input=raw output=raw/fasta)
+fastq.info(fastq=SRR1514251.fastq)
+fastq.info(fastq=SRR1514253.fastq)
+fastq.info(fastq=SRR1514255.fastq)
+fastq.info(fastq=SRR1514264.fastq)
+fastq.info(fastq=SRR1514266.fastq)
+fastq.info(fastq=SRR1514268.fastq)
+fastq.info(fastq=SRR1514277.fastq)
+fastq.info(fastq=SRR1514279.fastq)
+fastq.info(fastq=SRR1514281.fastq)
+fastq.info(fastq=SRR2297190.fastq)
+fastq.info(fastq=SRR2297191.fastq)
+fastq.info(fastq=SRR2297192.fastq)
+fastq.info(fastq=SRR2297193.fastq)
+fastq.info(fastq=SRR2297194.fastq)
+fastq.info(fastq=SRR2297195.fastq)
+
+##combine fasta file and make.group file
+set.dir(input=raw/fasta output=raw)  
+system(cat *fasta > project.fasta)
+
+make.group(fasta=SRR1514251.fasta-SRR1514253.fasta-SRR1514255.fasta-SRR1514264.fasta-SRR1514266.fasta-SRR1514268.fasta-SRR1514277.fasta-SRR1514279.fasta-SRR1514281.fasta-SRR2297190.fasta-SRR2297191.fasta-SRR2297192.fasta-SRR2297193.fasta-SRR2297194.fasta-SRR2297195.fasta, groups=SRR1514251-SRR1514253-SRR1514255-SRR1514264-SRR1514266-SRR1514268-SRR1514277-SRR1514279-SRR1514281-SRR2297190-SRR2297191-SRR2297192-SRR2297193-SRR2297194-SRR2297195) 
+system(cp raw/mergegroups raw/project.groups)
+
+##preparing pcr alignment to find start and end
+set.dir(input=references output=references)
+pcr.seqs(fasta=ecoli.16srrna.fasta, oligos=pcrTest.oligos)
+align.seqs(fasta=ecoli.16srrna.pcr.fasta, reference=silva.seed_v128.align)
+summary.seqs(fasta=ecoli.16srrna.pcr.align)
+pcr.seqs(fasta=silva.seed_v128.align, start=1046, end=13127, keepdots=F)
+system(mv references/silva.seed_v128.pcr.align silva.v1v3.fasta)
+
+##reducing error/prep for analysis
+system(cp raw/project.groups mothur/project.groups)
+system(cp raw/project.fasta mothur/project.fasta)
+set.dir(input=mothur, output=mothur)
+
+#############
+###454 SOP###
+summary.seqs(fasta=project.fasta)
+
+unique.seqs(fasta=project.fasta)
+summary.seqs(fasta=current, name=current)
+
+trim.seqs(fasta=project.unique.fasta, name=project.names, pdiffs=2, bdiffs=1, maxhomop=8, minlength=300, flip=T, processors=2)
+summary.seqs(fasta=project.unique.trim.fasta, name=project.trim.names)
+
+count.seqs(name=project.trim.names, group=project.groups, processors=1)
+
+##################
+###EDAMAME SOP####
+
+align.seqs(fasta=project.unique.trim.fasta, reference=references/silva.v1v3.fasta, processors=2, flip=t,processors=2)
+summary.seqs(fasta=current, count=current)
+
+screen.seqs(fasta=current, count=current, end=9229, maxambig=0, optimize=start, criteria=95, processors=2)
+summary.seqs(fasta=current, count=current)
+
+filter.seqs(fasta=current, vertical=T, trump=., processors=2)
+summary.seqs(fasta=current, count=current)
+
+unique.seqs(fasta=current, count=current)
+summary.seqs(fasta=current, count=current)
+
+pre.cluster(fasta=current, count=current, diffs=2)
+summary.seqs(fasta=current, count=current)
+ 
+chimera.vsearch(fasta=current, count=current, processors=2)
+remove.seqs(accnos=current, fasta=current, count=current, dups=T)
+summary.seqs(fasta=current, count=current)
+ 
+classify.seqs(fasta=current, count=current, template=references/trainset16_022016.pds.fasta, taxonomy=references/trainset16_022016.pds.tax, cutoff=80, processors=2)
+remove.lineage(fasta=current, count=current, taxonomy=current, taxon=Mitochondria-Chloroplast-Archaea-Eukaryota-unknown)
+summary.seqs(fasta=current, count=current)
+ 
+##OTU analysis 
+dist.seqs(fasta=current, cutoff=0.15, processors=2) ##this part takes forever
+cluster(column=current, count=current, cutoff=0.03)
+make.shared(list=current, count=current, label=0.03)
+classify.otu(list=current, count=current, taxonomy=current, label=0.03)
+
+dist.seqs(fasta=current, output=lt, processors=8)
+clearcut(phylip=current)
+
+##phylotype
+phylotype(taxonomy=current)
+make.shared(list=current, count=current, label=1)
+classify.otu(list=current, count=current, taxonomy=current, label=1)
+
+rename.file(count=project.unique.trim.good.filter.unique.precluster.pick.pick.count_table, tree=project.unique.trim.good.filter.unique.precluster.pick.pick.phylip.tre, shared=project.unique.trim.good.filter.unique.precluster.pick.pick.opti_mcc.shared, constaxonomy=project.unique.trim.good.filter.unique.precluster.pick.pick.opti_mcc.0.03.cons.taxonomy, prefix=final, deleteold=false)
+
+##analysis
+count.groups(shared=final.opti_mcc.shared)
+sub.sample(shared=final.opti_mcc.shared, size=1099)
+
+rarefaction.single(shared=final.opti_mcc.shared, calc=sobs, freq=100)
+summary.single(shared=final.opti_mcc.shared, calc=nseqs-coverage-sobs-chao-shannon-shannoneven-invsimpson-simpson, subsample=1099)
+
+heatmap.bin(shared=final.opti_mcc.0.03.subsample.shared, scale=log2, numotu=50) 
+dist.shared(shared=final.opti_mcc.shared, calc=thetayc-jclass, subsample=1099)
+
+heatmap.sim(phylip=final.opti_mcc.thetayc.0.03.lt.ave.dist)
+heatmap.sim(phylip=final.opti_mcc.jclass.0.03.lt.ave.dist)
+
+tree.shared(phylip=final.opti_mcc.thetayc.0.03.lt.ave.dist)
+parsimony(tree=final.opti_mcc.thetayc.0.03.lt.ave.tre, group=meta.design,  groups=all)
+pcoa(phylip=final.opti_mcc.thetayc.0.03.lt.ave.dist)
+nmds(phylip=final.opti_mcc.thetayc.0.03.lt.ave.dist)
+nmds(phylip=final.opti_mcc.thetayc.0.03.lt.ave.dist, mindim=3, maxdim=3)
+
+amova(phylip=final.opti_mcc.thetayc.0.03.lt.ave.dist, design=metaregion.design)
+amova(phylip=final.opti_mcc.thetayc.0.03.lt.ave.dist, design=metaage.design)
+amova(phylip=final.opti_mcc.thetayc.0.03.lt.ave.dist, design=metaregionage.design)
+
+homova(phylip=final.opti_mcc.thetayc.0.03.lt.ave.dist, design=metaregion.design)
+homova(phylip=final.opti_mcc.thetayc.0.03.lt.ave.dist, design=metaage.design)
+homova(phylip=final.opti_mcc.thetayc.0.03.lt.ave.dist, design=metaregionage.design)
+
+metastats(shared=final.opti_mcc.0.03.subsample.shared, design=meta2.design)
+lefse(shared=final.opti_mcc.0.03.subsample.shared, design=meta2.design)
+
+phylo.diversity(tree=final.tre, count=final.count_table, rarefy=T)
+unifrac.unweighted(tree=final.tre, count=final.count_table, distance=lt, processors=2, random=F, subsample=1099)
+unifrac.weighted(tree=final.tre, count=final.count_table, distance=lt, processors=2, random=F, subsample=1099)
+
+pcoa(phylip=final.tre1.weighted.ave.dist)
+amova(phylip=final.tre1.weighted.ave.dist, design=metaregion.design)
+amova(phylip=final.tre1.weighted.ave.dist, design=metaage.design)
+amova(phylip=final.tre1.weighted.ave.dist, design=metaregionage.design)
+
+homova(phylip=final.tre1.weighted.ave.dist, design=metaregion.design)
+homova(phylip=final.tre1.weighted.ave.dist, design=metaage.design)
+homova(phylip=final.tre1.weighted.ave.dist, design=metaregionage.design)
